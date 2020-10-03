@@ -15,8 +15,6 @@
 'along with this program. If Not, see < http: //www.gnu.org/licenses/>.
 
 
-Imports System.Windows.Forms
-Imports BasicPawn
 Imports ICSharpCode.TextEditor
 
 Public Class FormReportDetails
@@ -30,9 +28,9 @@ Public Class FormReportDetails
         ' This call is required by the designer.
         InitializeComponent()
 
-        ' Add any initialization after the InitializeComponent() call.
-        Panel2.Name &= "@FooterDarkControl"
-        Panel4.Name &= "@FooterDarkControl"
+        ' Add any initialization after the InitializeComponent() call. 
+        ClassControlStyle.SetNameFlag(Panel2, ClassControlStyle.ENUM_STYLE_FLAGS.CONTROL_FOOTER_DARK)
+        ClassControlStyle.SetNameFlag(Panel4, ClassControlStyle.ENUM_STYLE_FLAGS.CONTROL_FOOTER_DARK)
 
         m_WarningText = ""
 

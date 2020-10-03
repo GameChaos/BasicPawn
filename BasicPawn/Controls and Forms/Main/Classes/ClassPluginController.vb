@@ -30,7 +30,7 @@ Public Class ClassPluginController
     Structure STRUC_PLUGIN_ITEM
         Dim sFile As String
         Dim mPluginInformation As IPluginInfoInterface.STRUC_PLUGIN_INFORMATION
-        Dim mPluginInterface As IPluginInterfaceV9
+        Dim mPluginInterface As IPluginInterfaceV10
     End Structure
     Private g_lPlugins As New List(Of STRUC_PLUGIN_ITEM)
 
@@ -53,7 +53,7 @@ Public Class ClassPluginController
         End Get
     End Property
 
-    Public Function GetPluginInfo(mPluginInterface As IPluginInterfaceV9) As IPluginInfoInterface.STRUC_PLUGIN_INFORMATION
+    Public Function GetPluginInfo(mPluginInterface As IPluginInterfaceV10) As IPluginInfoInterface.STRUC_PLUGIN_INFORMATION
         For Each mPlugin In m_Plugins
             If (mPluginInterface IsNot mPlugin.mPluginInterface) Then
                 Continue For
@@ -166,7 +166,7 @@ Public Class ClassPluginController
         Next
     End Sub
 
-    Private Function LoadPlugin(sFile As String) As IPluginInterfaceV9
+    Private Function LoadPlugin(sFile As String) As IPluginInterfaceV10
         Dim mAssembly = Assembly.LoadFile(sFile)
 
         If (mAssembly Is Nothing) Then
@@ -192,11 +192,11 @@ Public Class ClassPluginController
 
             'Find plugin stuff
             For Each mType In GetValidTypes(mAssembly)
-                If (Not GetType(IPluginInterfaceV9).IsAssignableFrom(mType)) Then
+                If (Not GetType(IPluginInterfaceV10).IsAssignableFrom(mType)) Then
                     Continue For
                 End If
 
-                Dim mPlugin = DirectCast(mAssembly.CreateInstance(mType.FullName), IPluginInterfaceV9)
+                Dim mPlugin = DirectCast(mAssembly.CreateInstance(mType.FullName), IPluginInterfaceV10)
 
                 g_lPlugins.Add(New STRUC_PLUGIN_ITEM With {
                     .mPluginInformation = mPluginInfo.m_PluginInformation,
@@ -239,4 +239,47 @@ Public Class ClassPluginController
             Return lTypes.ToArray
         End Try
     End Function
+
+    Class ClassPluginConfig
+        Inherits ClassIni
+
+        Private g_sConfigDirectory As String = IO.Path.Combine(Application.StartupPath, "plugins\configs")
+        Private g_sConfigName As String = ""
+
+        Public Sub New(sConfigName As String)
+            MyBase.New(New IO.MemoryStream())
+
+            If (String.IsNullOrEmpty(sConfigName)) Then
+                Throw New ArgumentException("Config name can not be NULL")
+            End If
+
+            g_sConfigName = sConfigName
+        End Sub
+
+        ReadOnly Property m_ConfigFile As String
+            Get
+                Return IO.Path.Combine(g_sConfigDirectory, String.Format("{0}.{1}", g_sConfigName, "ini"))
+            End Get
+        End Property
+
+        Public Sub SaveConfig()
+            If (Not IO.Directory.Exists(g_sConfigDirectory)) Then
+                IO.Directory.CreateDirectory(g_sConfigDirectory)
+            End If
+
+            ExportToFile(m_ConfigFile)
+        End Sub
+
+        Public Sub LoadConfig()
+            If (Not IO.Directory.Exists(g_sConfigDirectory)) Then
+                IO.Directory.CreateDirectory(g_sConfigDirectory)
+            End If
+
+            If (Not IO.File.Exists(m_ConfigFile)) Then
+                IO.File.WriteAllText(m_ConfigFile, "")
+            End If
+
+            ParseFromFile(m_ConfigFile)
+        End Sub
+    End Class
 End Class

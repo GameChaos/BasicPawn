@@ -193,15 +193,22 @@ Public Class ClassTabControl
         Try
             BeginUpdate()
 
-            If (bPrompSave AndAlso PromptSaveTab(iIndex)) Then
+            If (bPrompSave AndAlso Not PromptSaveTab(iIndex)) Then
                 Return False
             End If
 
             RaiseEvent OnTabRemoved(m_Tab(iIndex))
 
-            Dim mTabPage = m_Tab(iIndex)
-            mTabPage.Dispose()
-            mTabPage = Nothing
+            Try
+                'We do not want to call SelectTab() when diposing tabs. We will do it afterwards aynways.
+                g_bIgnoreOnTabSelected = True
+
+                Dim mTabPage = m_Tab(iIndex)
+                mTabPage.Dispose()
+                mTabPage = Nothing
+            Finally
+                g_bIgnoreOnTabSelected = False
+            End Try
 
             If (m_TabsCount < 1) Then
                 AddTab()
@@ -245,13 +252,15 @@ Public Class ClassTabControl
         Try
             BeginUpdate()
 
-            g_bIgnoreOnTabSelected = True
+            Try
+                g_bIgnoreOnTabSelected = True
 
-            Dim mFrom As ClassTab = m_Tab(iFromIndex)
-            g_mFormMain.TabControl_SourceTabs.TabPages.Remove(mFrom)
-            g_mFormMain.TabControl_SourceTabs.TabPages.Insert(iToIndex, mFrom)
-
-            g_bIgnoreOnTabSelected = False
+                Dim mFrom As ClassTab = m_Tab(iFromIndex)
+                g_mFormMain.TabControl_SourceTabs.TabPages.Remove(mFrom)
+                g_mFormMain.TabControl_SourceTabs.TabPages.Insert(iToIndex, mFrom)
+            Finally
+                g_bIgnoreOnTabSelected = False
+            End Try
 
             SelectTab(iToIndex)
         Finally
@@ -280,7 +289,12 @@ Public Class ClassTabControl
                     m_Tab(iIndex).m_HandlersEnabled = True
                 End If
 
-                g_mFormMain.TabControl_SourceTabs.SelectTab(iIndex)
+                Try
+                    g_bIgnoreOnTabSelected = True
+                    g_mFormMain.TabControl_SourceTabs.SelectTab(iIndex)
+                Finally
+                    g_bIgnoreOnTabSelected = False
+                End Try
 
                 If (g_iBeginUpdateCount > 0) Then
                     g_bBeginRequestSyntaxUpdate = True
@@ -386,7 +400,7 @@ Public Class ClassTabControl
     ''' <param name="bIgnoreSavePrompt">If true, the new file will be opened without prompting to save the changed source</param>
     ''' <returns></returns>
     Public Function OpenFileTab(iIndex As Integer, sFile As String, Optional bIgnoreSavePrompt As Boolean = False, Optional bKeepView As Boolean = True) As Boolean
-        If (Not bIgnoreSavePrompt AndAlso PromptSaveTab(iIndex)) Then
+        If (Not bIgnoreSavePrompt AndAlso Not PromptSaveTab(iIndex)) Then
             Return False
         End If
 
@@ -481,7 +495,7 @@ Public Class ClassTabControl
     ''' </summary>
     ''' <param name="iIndex"></param>
     ''' <param name="bSaveAs">Force to use a new file using SaveFileDialog</param>
-    Public Sub SaveFileTab(iIndex As Integer, Optional bSaveAs As Boolean = False)
+    Public Function SaveFileTab(iIndex As Integer, Optional bSaveAs As Boolean = False) As Boolean
         If (bSaveAs OrElse m_Tab(iIndex).m_IsUnsaved OrElse m_Tab(iIndex).m_InvalidFile) Then
             Dim sOldFile As String = If(m_Tab(iIndex).m_IsUnsaved OrElse m_Tab(iIndex).m_InvalidFile, "", m_Tab(iIndex).m_File)
 
@@ -511,6 +525,10 @@ Public Class ClassTabControl
                     g_mFormMain.g_ClassSyntaxParser.StartUpdateSchedule(ClassSyntaxParser.ENUM_PARSE_TYPE_FLAGS.ALL)
 
                     RaiseEvent OnTabSaved(m_Tab(iIndex), sOldFile, i.FileName)
+
+                    Return True
+                Else
+                    Return False
                 End If
             End Using
         Else
@@ -529,8 +547,10 @@ Public Class ClassTabControl
             g_mFormMain.g_mUCStartPage.g_mClassRecentItems.AddRecent(m_Tab(iIndex).m_File)
 
             RaiseEvent OnTabSaved(m_Tab(iIndex), "", m_Tab(iIndex).m_File)
+
+            Return True
         End If
-    End Sub
+    End Function
 
     ''' <summary>
     ''' If the code has been changed it will prompt the user and saves the source. The user can abort the saving.
@@ -538,75 +558,25 @@ Public Class ClassTabControl
     ''' <param name="iIndex"></param>
     ''' <param name="bAlwaysPrompt">If true, always show MessageBox even if the code didnt change</param>
     ''' <param name="bAlwaysYes">If true, ignores MessageBox prompt</param>
-    ''' <returns>False if saved, otherwise canceled.</returns>
+    ''' <returns>True if saved or declined, otherwise canceled.</returns>
     Public Function PromptSaveTab(iIndex As Integer, Optional bAlwaysPrompt As Boolean = False, Optional bAlwaysYes As Boolean = False, Optional bAlwaysSaveUnsaved As Boolean = False) As Boolean
         Dim bIsUnsaved As Boolean = (m_Tab(iIndex).m_IsUnsaved OrElse m_Tab(iIndex).m_InvalidFile)
-        Dim sOldFile As String = If(m_Tab(iIndex).m_IsUnsaved OrElse m_Tab(iIndex).m_InvalidFile, "", m_Tab(iIndex).m_File)
 
         If (bAlwaysPrompt OrElse m_Tab(iIndex).m_Changed OrElse (bAlwaysSaveUnsaved AndAlso bIsUnsaved)) Then
             'Continue
         Else
-            Return False
+            Return True
         End If
 
-        Select Case (If(bAlwaysYes, DialogResult.Yes, MessageBox.Show(String.Format("Do you want to save your work? '{0} ({1})'", m_Tab(iIndex).m_Title, iIndex), "Information", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question)))
+        Select Case (If(bAlwaysYes, DialogResult.Yes, MessageBox.Show(String.Format("Do you want to save your work? '{0}' ({1})", m_Tab(iIndex).m_Title, iIndex), "Information", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question)))
             Case DialogResult.Yes
-                If (bIsUnsaved) Then
-                    Using i As New SaveFileDialog
-                        i.Filter = "All supported files|*.sp;*.inc;*.sma|SourcePawn|*.sp|Include|*.inc|AMX Mod X|*.sma|Pawn (Not fully supported)|*.pwn;*.p|All files|*.*"
-
-                        i.InitialDirectory = If(String.IsNullOrEmpty(m_Tab(iIndex).m_File), "", IO.Path.GetDirectoryName(m_Tab(iIndex).m_File))
-                        i.FileName = IO.Path.GetFileName(m_Tab(iIndex).m_File)
-
-                        If (i.ShowDialog = DialogResult.OK) Then
-                            m_Tab(iIndex).m_FileCachedWriteDate = Date.MaxValue
-                            m_Tab(iIndex).m_File = i.FileName
-
-                            m_Tab(iIndex).m_Changed = False
-                            m_Tab(iIndex).g_ClassLineState.SaveStates()
-
-                            m_Tab(iIndex).m_TextEditor.InvalidateTextArea()
-
-                            g_mFormMain.g_mUCInformationList.PrintInformation(ClassInformationListBox.ENUM_ICONS.ICO_INFO, "User saved file to: " & m_Tab(iIndex).m_File, New UCInformationList.ClassListBoxItemAction.ClassActions.STRUC_ACTION_OPEN(m_Tab(iIndex).m_File))
-
-                            IO.File.WriteAllText(m_Tab(iIndex).m_File, m_Tab(iIndex).m_TextEditor.Document.TextContent)
-
-                            m_Tab(iIndex).m_FileCachedWriteDate = m_Tab(iIndex).m_FileRealWriteDate
-
-                            g_mFormMain.g_mUCStartPage.g_mClassRecentItems.AddRecent(m_Tab(iIndex).m_File)
-
-                            RaiseEvent OnTabSaved(m_Tab(iIndex), sOldFile, m_Tab(iIndex).m_File)
-
-                            Return False
-                        Else
-                            Return True
-                        End If
-                    End Using
-                Else
-                    m_Tab(iIndex).m_FileCachedWriteDate = Date.MaxValue
-                    m_Tab(iIndex).m_Changed = False
-                    m_Tab(iIndex).g_ClassLineState.SaveStates()
-
-                    m_Tab(iIndex).m_TextEditor.InvalidateTextArea()
-
-                    g_mFormMain.g_mUCInformationList.PrintInformation(ClassInformationListBox.ENUM_ICONS.ICO_INFO, "User saved file to: " & m_Tab(iIndex).m_File, New UCInformationList.ClassListBoxItemAction.ClassActions.STRUC_ACTION_OPEN(m_Tab(iIndex).m_File))
-
-                    IO.File.WriteAllText(m_Tab(iIndex).m_File, m_Tab(iIndex).m_TextEditor.Document.TextContent)
-
-                    m_Tab(iIndex).m_FileCachedWriteDate = m_Tab(iIndex).m_FileRealWriteDate
-
-                    g_mFormMain.g_mUCStartPage.g_mClassRecentItems.AddRecent(m_Tab(iIndex).m_File)
-
-                    RaiseEvent OnTabSaved(m_Tab(iIndex), sOldFile, m_Tab(iIndex).m_File)
-
-                    Return False
-                End If
+                Return SaveFileTab(iIndex, bIsUnsaved)
 
             Case DialogResult.No
-                Return False
+                Return True
 
             Case Else
-                Return True
+                Return False
 
         End Select
     End Function
@@ -916,9 +886,12 @@ Public Class ClassTabControl
             Return
         End If
 
-        g_bIgnoreOnTabSelected = True
-        SelectTab(m_ActiveTabIndex)
-        g_bIgnoreOnTabSelected = False
+        Try
+            g_bIgnoreOnTabSelected = True
+            SelectTab(m_ActiveTabIndex)
+        Finally
+            g_bIgnoreOnTabSelected = False
+        End Try
     End Sub
 
     Private Sub OnTabSyntaxParseSuccess(iUpdateType As ClassSyntaxParser.ENUM_PARSE_TYPE_FLAGS, sTabIdentifier As String, iOptionFlags As ClassSyntaxParser.ENUM_PARSE_OPTIONS_FLAGS, iFullParseError As ClassSyntaxParser.ENUM_PARSE_ERROR, iVarParseError As ClassSyntaxParser.ENUM_PARSE_ERROR)
@@ -1130,6 +1103,10 @@ Public Class ClassTabControl
 
         Public Function OpenFileTab(sFile As String, Optional bIgnoreSavePrompt As Boolean = False) As Boolean
             Return g_mFormMain.g_ClassTabControl.OpenFileTab(m_Index, sFile, bIgnoreSavePrompt)
+        End Function
+
+        Public Function SaveFileTab(bSaveAs As Boolean) As Boolean
+            Return g_mFormMain.g_ClassTabControl.SaveFileTab(Me.m_Index, bSaveAs)
         End Function
 
         Public Sub SelectTab()
@@ -2506,11 +2483,6 @@ Public Class ClassTabControl
             End Sub
 
             Public Sub UpdateHighlighting()
-                If (Not ClassSettings.g_bSettingsHighlightCurrentScope) Then
-                    RemoveHighlighting()
-                    Return
-                End If
-
                 Dim sText As String = g_ClassTab.m_TextEditor.Document.TextContent
                 Dim iLanguage As ClassSyntaxTools.ENUM_LANGUAGE_TYPE = g_ClassTab.m_Language
                 Dim mSourceAnalysis As New ClassSyntaxTools.ClassSyntaxSourceAnalysis(sText, iLanguage)
@@ -2528,11 +2500,6 @@ Public Class ClassTabControl
             End Sub
 
             Public Sub UpdateHighlighting(mScopeLocation As Point)
-                If (Not ClassSettings.g_bSettingsHighlightCurrentScope) Then
-                    RemoveHighlighting()
-                    Return
-                End If
-
                 Dim mOldTextMarker = g_mTextMarker
                 Dim mColor = g_ClassTab.m_TextEditor.Document.HighlightingStrategy.GetColorFor("ScopeMarker").Color
 
@@ -2717,11 +2684,6 @@ Public Class ClassTabControl
             End Sub
 
             Public Sub UpdateHighlighting(mWordLocations As List(Of Point), iType As ENUM_MARKER_TYPE)
-                If (Not ClassSettings.g_bSettingsHighlightCurrentScope) Then
-                    RemoveHighlighting(iType)
-                    Return
-                End If
-
                 Dim mFrontColor As Color
                 Dim mBackColor As Color
 
